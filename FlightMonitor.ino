@@ -4,6 +4,7 @@
 #include "TimeRTCaGPS.h"
 #include "TFTdisplej.h"
 #include "Thermometer.h"
+#include "Rpm.h"
 #include <Arduino.h>
 //#include <FS.h>
 //#include "SD.h"
@@ -13,7 +14,7 @@
 //#include "ESP8266FtpServer.h"
 
 
-#define apply_Q_RPM(x)  ((x) /4)
+
 
 //File myFile;
 
@@ -24,8 +25,7 @@
 #define BUTTON_RESET 27
 #define BLINKINGTIME 10 // kolik sekund bude blikat červená ledka
 
-#define MINIMUM_RPM_PULSE_LENGTH_US 2000  //
-#define RPM_MIN_PULSE_PERIOD 1000000 //1000000us = 60RPM minimum value
+
 
 #define BTN_STOP_ALARM 0
 
@@ -65,14 +65,7 @@ float Tactual=0;
 float deltaT=0;
 
 
-struct RPM
-{
-  const uint8_t PIN;
-  uint32_t numberCountPulses;
-  bool pressed;
-  uint32_t PeriodaUS;
-  uint8_t checkRPM;
-};
+
 
 /*struct monitoring {
     float NTCtemp;
@@ -81,6 +74,7 @@ struct RPM
     int AlarmsCount;
 };*/
 
+Rpm Rpm;  //constructor
 WiFiVirtuino WiFiVirtuino; //konstruktor
 //DayOfWeek DayOfWeek; //konstruktor
 TimeRTCaGPS TimeRTCaGPS; //konstruktor
@@ -89,8 +83,7 @@ SDcard SDcard;         //konstruktor
 FtpServer ftpSrv;   //set #define FTP_DEBUG in ESP32FtpServer.h to see ftp verbose on serial
 TFT_22_ILI9225 tft = TFT_22_ILI9225(TFT_RST, TFT_RS, TFT_CS, TFT_LED, TFT_BRIGHTNESS);
 
-//***RPM a ADC
-RPM RPM1 = {32, 0, false}; //GPIO 32 jako RPM čidlo
+
 
 hw_timer_t *timer = NULL;
 volatile SemaphoreHandle_t timerSemaphore;
@@ -110,66 +103,15 @@ uint16_t SDerrorlogcount=0;
 uint8_t blinking;
 
 
-static uint32_t rpm_last_pulse_length=0;
-static uint64_t rpm_cumulated_pulse_length=0;
-static uint32_t rpm_valid=0;
-
-uint32_t Rpm_FillMaxLengthPulse(void)
-{
-  rpm_cumulated_pulse_length=0;
-  for(uint32_t i=0;i<100;i++)
-  {
-    rpm_cumulated_pulse_length -= apply_Q_RPM(rpm_cumulated_pulse_length);
-    rpm_cumulated_pulse_length += RPM_MIN_PULSE_PERIOD;
-  }
-}
-
-uint32_t Rpm_GetRpm(void)
-{
-  uint32_t temp=apply_Q_RPM(rpm_cumulated_pulse_length);
-  if(0<temp && temp<=RPM_MIN_PULSE_PERIOD) return 60000000/temp;
-  return 0;
-}
-
-void Rpm_Callback01s(void)
-{
-  rpm_cumulated_pulse_length -= apply_Q_RPM(rpm_cumulated_pulse_length);
-  rpm_cumulated_pulse_length += rpm_last_pulse_length;
-  if(rpm_valid)rpm_valid--; //rpm_valid is decremented every 100ms
-  else rpm_cumulated_pulse_length=0;
-}
-
-void Rpm_AddNewPulse(void)
-{
-  static uint32_t last_micros=0;
-  static uint32_t last_valid_micros=0;
-  uint32_t current_micros=micros();
-
-  if(current_micros-last_micros>MINIMUM_RPM_PULSE_LENGTH_US)
-  {
-    delayMicroseconds(50);
-    if(digitalRead(RPM1.PIN)==0)
-    {
-      rpm_last_pulse_length = (current_micros-last_valid_micros);
-      last_valid_micros=current_micros;
-      if(rpm_valid==0)
-      {
-        Rpm_FillMaxLengthPulse();
-      }
-      rpm_valid=20;    //rpm_valid flag is decremented every 100ms
-    }  
-  }
-  last_micros=current_micros;
-}
 
 
 
-
+RPM RPM1 = {32, 0, false}; //GPIO 32 jako RPM čidlo
 
 //***Počítač pulzů z RPM v přerušení
 void IRAM_ATTR isr(void *arg)
 {
-    Rpm_AddNewPulse();
+    Rpm.AddNewPulse();
 }
 
 void setup()
@@ -187,6 +129,9 @@ void setup()
   digitalWrite(BEEPER,LOW);
 
   Thermometer.Init();
+  Rpm.Init(32);
+  pinMode(32, INPUT_PULLUP);                          //RPM jako vstup
+  attachInterruptArg(RPM1.PIN, isr, &RPM1, CHANGE); //RPM reaguje na sestupnou hranu a spouští přerušení
   
   //Inicializace SD karty
   SDcard.setup();
@@ -248,9 +193,7 @@ void setup()
   tft.begin();
 #endif
 
-  //***nastavení RPM a ADC
-  pinMode(RPM1.PIN, INPUT_PULLUP);                          //RPM jako vstup
-  attachInterruptArg(RPM1.PIN, isr, &RPM1, CHANGE); //RPM reaguje na sestupnou hranu a spouští přerušení
+  
   
   // Set BTN_STOP_ALARM to input mode
   pinMode(BTN_STOP_ALARM, INPUT);
@@ -287,7 +230,7 @@ void loop()
   }
   
   if ((current_millis - timer01sec) >= 100) {
-    Rpm_Callback01s();
+    Rpm.Callback01s();
     if(BSP_IsResetBTNPressed())//restart pokud je stisknuto tlačítko RESET déle než 7 sekund
     {
       if(rst_btn_cnt>=SECONDS_TO_RESET*10) SystemRestart();
@@ -303,7 +246,7 @@ void loop()
   if ((current_millis - timer1sec) >= 1000) {
 
     Serial.print("RPM: ");
-    Serial.println(Rpm_GetRpm());
+    Serial.println(Rpm.GetRpm());
 
     Thermometer.Callback1s();
 
@@ -322,7 +265,7 @@ void loop()
       deltaT = (Tminus5 - Tactual)*2; //deltaTeploty za 10 sekund v desetinách stupně
       kmh = TimeRTCaGPS.kmphcheck();
       //Vyhodnocení RPM      
-      ikona = CheckStatus(Rpm_GetRpm(), Thermometer.GetTemperature(), deltaT);
+      ikona = CheckStatus(Rpm.GetRpm(), Thermometer.GetTemperature(), deltaT);
 
       DateTime now = TimeRTCaGPS.datetime();
       ActualDate=TimeRTCaGPS.process(RTCcompleteDate);
@@ -332,7 +275,7 @@ void loop()
         WiFiVirtuino.loopVirtuino(now);//Poslání času a data do Virtuina
         WiFiVirtuino.WriteInt(1, Thermometer.GetTemperature());//TO do Virtuina
         WiFiVirtuino.WriteInt(2, deltaT);//TO do Virtuina
-        WiFiVirtuino.WriteInt(3, Rpm_GetRpm());//TO do Virtuina
+        WiFiVirtuino.WriteInt(3, Rpm.GetRpm());//TO do Virtuina
         WiFiVirtuino.WriteInt(4, kmh);//TO do Virtuina
         WiFiVirtuino.WriteInt(5, TimeRTCaGPS.GPS_OK());//status GPSky
         //*******************************************************
@@ -397,7 +340,7 @@ void loop()
       //char charActualDate[16];
       //ActualDate.toCharArray(charActualDate, 16);
       //char charActualDate[]=ActualDate;
-      //SDcard.writetemp( Thermometer.GetTemperature(), NTCtemp,Rpm_GetRpm(), ActualDate, ActualTime);
+      //SDcard.writetemp( Thermometer.GetTemperature(), NTCtemp,Rpm.GetRpm(), ActualDate, ActualTime);
       //SDcard.errorlogcount(SD);
 /*      Serial.print("Ikona: ");
       Serial.print(ikona); //Serial.print("\t");
@@ -431,7 +374,7 @@ void loop()
 
   if ((current_millis - timer10sec) >= 10000) {
 
-    SDcard.writetemp( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh);
+    SDcard.writetemp( Thermometer.GetTemperature(), deltaT,Rpm.GetRpm(), ActualDate, ActualTime, flytime, kmh);
     timer10sec = current_millis;
   }
 
@@ -987,7 +930,7 @@ void TFTdisplayENGINEOVERHEATING(void)
   tft.drawGFXText(x+31, y+42+42+21, String("HEATING"), FontColor); // Print string
   if (writetologtime==5)
   {
-    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE OVER HEATING");
+    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm.GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE OVER HEATING");
   }
   writetologtime++;
 
@@ -1015,7 +958,7 @@ void TFTdisplayRPMTOHIGH(void)
     tft.drawGFXText(x+31, y+42+42+21, String("TO HIGH"), FontColor); // Print string
     if (writetologtime==5)
     {
-      SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "RPM TO HIGH");
+      SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm.GetRpm(), ActualDate, ActualTime, flytime, kmh, "RPM TO HIGH");
     }
     writetologtime++;
 }
@@ -1042,7 +985,7 @@ void TFTdisplayENGINESTOPCOOLING(void)
   tft.drawGFXText(x+31, y+42+42+21, String("COOLING"), FontColor); // Print string
   if (writetologtime==5)
   {
-    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE STOP COOLING");
+    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm.GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE STOP COOLING");
   }
   writetologtime++;
 
@@ -1068,7 +1011,7 @@ void TFTdisplaySHOCKCOOLING(void)
   tft.drawGFXText(x+31, y+42+42+21, String("COOLING"), FontColor); // Print string
   if (writetologtime==5)
   {
-    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE SHOCK COOLING");
+    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm.GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE SHOCK COOLING");
   }
   writetologtime++;
 
