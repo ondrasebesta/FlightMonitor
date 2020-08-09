@@ -3,7 +3,7 @@
 #include "WiFiVirtuino.h"
 #include "TimeRTCaGPS.h"
 #include "TFTdisplej.h"
-#include "RPMaADC.h"
+#include "Thermometer.h"
 #include <Arduino.h>
 //#include <FS.h>
 //#include "SD.h"
@@ -26,6 +26,8 @@
 
 #define MINIMUM_RPM_PULSE_LENGTH_US 2000  //
 #define RPM_MIN_PULSE_PERIOD 1000000 //1000000us = 60RPM minimum value
+
+#define BTN_STOP_ALARM 0
 
 //#define THmin 130 //minimální teplota hlav motoru, při které může letadlo letět
 //#define THmax 270 //maximální teplota hlav motoru, při které může letadlo letět
@@ -82,7 +84,7 @@ struct RPM
 WiFiVirtuino WiFiVirtuino; //konstruktor
 //DayOfWeek DayOfWeek; //konstruktor
 TimeRTCaGPS TimeRTCaGPS; //konstruktor
-RPMaADC RPMaADC;         //konstruktor
+Thermometer Thermometer;         //konstruktor
 SDcard SDcard;         //konstruktor
 FtpServer ftpSrv;   //set #define FTP_DEBUG in ESP32FtpServer.h to see ftp verbose on serial
 TFT_22_ILI9225 tft = TFT_22_ILI9225(TFT_RST, TFT_RS, TFT_CS, TFT_LED, TFT_BRIGHTNESS);
@@ -168,7 +170,7 @@ float Temp_GetTemperature(void)
 void Temp_Callback1s(void)
 {
   float tmp_temp=0;
-  if (RPMaADC.ADCeval(&tmp_temp))
+  if (Thermometer.ADCeval(&tmp_temp))
   {
     CumulatedTemperature -= apply_Q(CumulatedTemperature);
     CumulatedTemperature += tmp_temp;
@@ -197,7 +199,7 @@ void setup()
   digitalWrite(GREEN_LED,LOW);
   digitalWrite(BEEPER,LOW);
 
-  RPMaADC.TempSensorInit();
+  Thermometer.TempSensorInit();
   
   //Inicializace SD karty
   SDcard.setup();
@@ -266,10 +268,8 @@ void setup()
   // Set BTN_STOP_ALARM to input mode
   pinMode(BTN_STOP_ALARM, INPUT);
   
-  RPMaADC.ADsetup();
-
   float tmp_temp=0;
-  while(0== RPMaADC.ADCeval(&tmp_temp));
+  while(0== Thermometer.ADCeval(&tmp_temp));
 
   Serial.print("Thermocouple INIT temperature: ");
   Serial.print(tmp_temp);
@@ -785,8 +785,9 @@ void TFTdisplaySTARTENGINE2(void)
     displayscreen="TFTdisplaySTARTENGINE";
   }
 
-        tft.fillRectangle(140, 22+42+42+42+5,240,22+42+42+5, COLOR_BLACK); // Print string 
-        tft.drawGFXText(140, 22+42+42+42+5, String(Temp_GetTemperature()), COLOR_RED); // Print string 
+        tft.fillRectangle(140, 28+42+42+42+5,240,28+42+42+5, COLOR_BLACK); // Print string 
+        uint16_t temp=(Temp_GetTemperature()+0.5);//zaokrouhleni
+        tft.drawGFXText(140, 28+42+42+42+5, String(temp), COLOR_RED); // Print string 
   
 }
 
