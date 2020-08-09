@@ -1,10 +1,12 @@
 #include "Thermometer.h"
-//#include <Arduino.h>
 
 #include "SparkFun_MCP9600.h"
 MCP9600 tempSensor;
 
-void Thermometer::TempSensorInit()
+#define apply_Q_temperature(x)  ((x) /8)
+float CumulatedTemperature=0;
+
+void Thermometer::Init(void)
 {
   Wire.begin();
   Wire.setClock(100000);
@@ -58,13 +60,38 @@ uint8_t coefficient = 7;
         Serial.println(tempSensor.getFilterCoefficient(), BIN);
     }
 
-  
+
+    float tmp_temp=0;
+  while(0== ADCeval(&tmp_temp));
+
+  Serial.print("Thermocouple INIT temperature: ");
+  Serial.print(tmp_temp);
+  Serial.print(" °C");
+  Serial.println(); 
+
+  for(uint8_t i=0;i<100;i++)
+  {
+     CumulatedTemperature -= apply_Q_temperature(CumulatedTemperature);
+     CumulatedTemperature += tmp_temp;
+  }
   
 }
 
-//***********************Vyhodnocení teplotních čidel spolu s filtrací hodnot*********************************
-//J - Teplotní čidlo hlav motoru, provozní teplota 110 - 270 st.c, teplota = Uadc * 200
-//NTC - Teplotní čidlo oleje, provozní teplota 50 - 80 st.c
+float Thermometer::GetTemperature(void)
+{
+  return apply_Q_temperature(CumulatedTemperature); //CumulatedTemperature se prubezne aktualizuje ve smycce
+}
+
+void Thermometer::Callback1s(void)
+{
+  float tmp_temp=0;
+  if (ADCeval(&tmp_temp))
+  {
+    CumulatedTemperature -= apply_Q_temperature(CumulatedTemperature);
+    CumulatedTemperature += tmp_temp;
+  }
+}
+
 byte Thermometer::ADCeval(float *temperature)
 {
 

@@ -6,13 +6,11 @@
 class Thermometer
 {
 public:
-
-  byte ADCeval(float *temperature);
-  void TempSensorInit();
- 
-
+  void Init(void);
+  void Callback1s(void);
+  float GetTemperature(void);
 private:
-    
+  byte ADCeval(float *temperature);
 };
 
 #endif

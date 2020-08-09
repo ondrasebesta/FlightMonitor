@@ -12,7 +12,7 @@
 #include "ESP32FtpServer.h"
 //#include "ESP8266FtpServer.h"
 
-#define apply_Q(x)  ((x) /8)
+
 #define apply_Q_RPM(x)  ((x) /4)
 
 //File myFile;
@@ -63,7 +63,7 @@ float Tminus2=0;
 float Tminus1=0;
 float Tactual=0;
 float deltaT=0;
-float CumulatedTemperature=0;
+
 
 struct RPM
 {
@@ -162,20 +162,7 @@ void Rpm_AddNewPulse(void)
   last_micros=current_micros;
 }
 
-float Temp_GetTemperature(void)
-{
-  return apply_Q(CumulatedTemperature); //CumulatedTemperature se prubezne aktualizuje ve smycce
-}
 
-void Temp_Callback1s(void)
-{
-  float tmp_temp=0;
-  if (Thermometer.ADCeval(&tmp_temp))
-  {
-    CumulatedTemperature -= apply_Q(CumulatedTemperature);
-    CumulatedTemperature += tmp_temp;
-  }
-}
 
 
 
@@ -199,7 +186,7 @@ void setup()
   digitalWrite(GREEN_LED,LOW);
   digitalWrite(BEEPER,LOW);
 
-  Thermometer.TempSensorInit();
+  Thermometer.Init();
   
   //Inicializace SD karty
   SDcard.setup();
@@ -268,13 +255,7 @@ void setup()
   // Set BTN_STOP_ALARM to input mode
   pinMode(BTN_STOP_ALARM, INPUT);
   
-  float tmp_temp=0;
-  while(0== Thermometer.ADCeval(&tmp_temp));
-
-  Serial.print("Thermocouple INIT temperature: ");
-  Serial.print(tmp_temp);
-  Serial.print(" °C");
-  Serial.println(); 
+  float tmp_temp=Thermometer.GetTemperature();
     
   Tminus5=tmp_temp;
   Tminus4=tmp_temp;
@@ -282,12 +263,6 @@ void setup()
   Tminus2=tmp_temp;
   Tminus1=tmp_temp;
   Tactual=tmp_temp;
-  
-  for(uint8_t i=0;i<100;i++)
-  {
-     CumulatedTemperature -= apply_Q(CumulatedTemperature);
-     CumulatedTemperature += tmp_temp;
-  }
 
   deltaT=0;
   TFTdisplayAFTERRESTART();
@@ -330,7 +305,7 @@ void loop()
     Serial.print("RPM: ");
     Serial.println(Rpm_GetRpm());
 
-    Temp_Callback1s();
+    Thermometer.Callback1s();
 
       //Vyhodnocení deltaT
       Tminus5 = Tminus4;
@@ -338,7 +313,7 @@ void loop()
       Tminus3 = Tminus2;
       Tminus2 = Tminus1;
       Tminus1 = Tactual;
-      Tactual = Temp_GetTemperature();
+      Tactual = Thermometer.GetTemperature();
 /*      Serial.print(" THmin: ");
       Serial.println(THmin);*/
       
@@ -347,7 +322,7 @@ void loop()
       deltaT = (Tminus5 - Tactual)*2; //deltaTeploty za 10 sekund v desetinách stupně
       kmh = TimeRTCaGPS.kmphcheck();
       //Vyhodnocení RPM      
-      ikona = CheckStatus(Rpm_GetRpm(), Temp_GetTemperature(), deltaT);
+      ikona = CheckStatus(Rpm_GetRpm(), Thermometer.GetTemperature(), deltaT);
 
       DateTime now = TimeRTCaGPS.datetime();
       ActualDate=TimeRTCaGPS.process(RTCcompleteDate);
@@ -355,7 +330,7 @@ void loop()
       if(WIFION==true)
       {
         WiFiVirtuino.loopVirtuino(now);//Poslání času a data do Virtuina
-        WiFiVirtuino.WriteInt(1, Temp_GetTemperature());//TO do Virtuina
+        WiFiVirtuino.WriteInt(1, Thermometer.GetTemperature());//TO do Virtuina
         WiFiVirtuino.WriteInt(2, deltaT);//TO do Virtuina
         WiFiVirtuino.WriteInt(3, Rpm_GetRpm());//TO do Virtuina
         WiFiVirtuino.WriteInt(4, kmh);//TO do Virtuina
@@ -422,12 +397,12 @@ void loop()
       //char charActualDate[16];
       //ActualDate.toCharArray(charActualDate, 16);
       //char charActualDate[]=ActualDate;
-      //SDcard.writetemp( Temp_GetTemperature(), NTCtemp,Rpm_GetRpm(), ActualDate, ActualTime);
+      //SDcard.writetemp( Thermometer.GetTemperature(), NTCtemp,Rpm_GetRpm(), ActualDate, ActualTime);
       //SDcard.errorlogcount(SD);
 /*      Serial.print("Ikona: ");
       Serial.print(ikona); //Serial.print("\t");
       Serial.print("   Jtemp: ");
-      Serial.println(Temp_GetTemperature()); //Serial.print("\t");*/
+      Serial.println(Thermometer.GetTemperature()); //Serial.print("\t");*/
 
       //Blikání červené ledky při porušení pravidel a pípání pípáku
       if(blinking >=1)
@@ -456,7 +431,7 @@ void loop()
 
   if ((current_millis - timer10sec) >= 10000) {
 
-    SDcard.writetemp( Temp_GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh);
+    SDcard.writetemp( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh);
     timer10sec = current_millis;
   }
 
@@ -495,7 +470,7 @@ uint8_t CheckStatus(uint32_t RPM, float TH, float deltaT)
     staytime=0;
   }
       
-  if (Temp_GetTemperature() > THmax && timeafterrestart > 5) // 238 stupnu odpovida 260 stupnum, je zde korekce + 10 stupnu pri zpracovani a +22 stupnu na vysokych teplotach / sonda ukayuje o 32 stupnu mene ney tam je
+  if (Thermometer.GetTemperature() > THmax && timeafterrestart > 5) // 238 stupnu odpovida 260 stupnum, je zde korekce + 10 stupnu pri zpracovani a +22 stupnu na vysokych teplotach / sonda ukayuje o 32 stupnu mene ney tam je
   {
     //static
     //LCD displej ENGINE OVERHEATING
@@ -529,7 +504,7 @@ uint8_t CheckStatus(uint32_t RPM, float TH, float deltaT)
     state=state;
     return state;
   }
-  if (Temp_GetTemperature() > THcooling && RPM < 100)
+  if (Thermometer.GetTemperature() > THcooling && RPM < 100)
   {
     //static
     //LCD displej ENGINE OVERHEATING
@@ -544,11 +519,11 @@ uint8_t CheckStatus(uint32_t RPM, float TH, float deltaT)
   //Po nahozeni motoru
   if (state == 0)
   { 
-    if (Temp_GetTemperature() >= 65) temptable = 0; //vyhodnocení teploty motoru před spuštěním/po restartu monitoru
-    else if (Temp_GetTemperature() >= 31) temptable = 30;
-    else if (Temp_GetTemperature() >= 20) temptable = 60;
-    else if (Temp_GetTemperature() >= 16) temptable = 90;
-    else if (Temp_GetTemperature() >= 11) temptable = 120;//nastaveny polovicni hodnoty
+    if (Thermometer.GetTemperature() >= 65) temptable = 0; //vyhodnocení teploty motoru před spuštěním/po restartu monitoru
+    else if (Thermometer.GetTemperature() >= 31) temptable = 30;
+    else if (Thermometer.GetTemperature() >= 20) temptable = 60;
+    else if (Thermometer.GetTemperature() >= 16) temptable = 90;
+    else if (Thermometer.GetTemperature() >= 11) temptable = 120;//nastaveny polovicni hodnoty
     else temptable = 150;
     //LCD displej START ENGINE
     //TFTdisplaySTARTENGINE();
@@ -634,7 +609,7 @@ uint8_t CheckStatus(uint32_t RPM, float TH, float deltaT)
   }
 
   //ENGINE COOLING 1200RPM OR FLY stav 9
-  /*if (state == 9 && Temp_GetTemperature() >= THmin)
+  /*if (state == 9 && Thermometer.GetTemperature() >= THmin)
   { 
     //LCD displej ENGINE COOLING 1200RPM OR FLY
     TFTdisplayENGINECOOLING1200RPMORFLY();
@@ -692,7 +667,7 @@ uint8_t CheckStatus(uint32_t RPM, float TH, float deltaT)
   }
 
   //ENGINE WARM UP OR OF zrušeno protože se nedochladí nikdy
-  /*if (state == 9 && Temp_GetTemperature() < THmin)
+  /*if (state == 9 && Thermometer.GetTemperature() < THmin)
   { 
     //LCD displej ENGINE WARM UP OR OF
     TFTdisplayENGINEWARMUPOROFF();
@@ -786,7 +761,7 @@ void TFTdisplaySTARTENGINE2(void)
   }
 
         tft.fillRectangle(140, 28+42+42+42+5,240,28+42+42+5, COLOR_BLACK); // Print string 
-        uint16_t temp=(Temp_GetTemperature()+0.5);//zaokrouhleni
+        uint16_t temp=(Thermometer.GetTemperature()+0.5);//zaokrouhleni
         tft.drawGFXText(140, 28+42+42+42+5, String(temp), COLOR_RED); // Print string 
   
 }
@@ -895,7 +870,7 @@ void TFTdisplayWARMUPENGINE1200(uint32_t RPM)
       tft.drawGFXText(x, y+42+42+5, String("  1200 RPM"), COLOR_GREEN); // Print string
       displayscreen="TFTdisplayWARMUPENGINE1200";
     }
-    int Jtempcelsius=Temp_GetTemperature();
+    int Jtempcelsius=Thermometer.GetTemperature();
     char JtempDISP[10];
     sprintf(JtempDISP, "T=%02d C", Jtempcelsius);
     tft.fillRectangle(40, 130, 200, 160, COLOR_BLACK);
@@ -1012,7 +987,7 @@ void TFTdisplayENGINEOVERHEATING(void)
   tft.drawGFXText(x+31, y+42+42+21, String("HEATING"), FontColor); // Print string
   if (writetologtime==5)
   {
-    SDcard.writeerrorlog( Temp_GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE OVER HEATING");
+    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE OVER HEATING");
   }
   writetologtime++;
 
@@ -1040,7 +1015,7 @@ void TFTdisplayRPMTOHIGH(void)
     tft.drawGFXText(x+31, y+42+42+21, String("TO HIGH"), FontColor); // Print string
     if (writetologtime==5)
     {
-      SDcard.writeerrorlog( Temp_GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "RPM TO HIGH");
+      SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "RPM TO HIGH");
     }
     writetologtime++;
 }
@@ -1067,7 +1042,7 @@ void TFTdisplayENGINESTOPCOOLING(void)
   tft.drawGFXText(x+31, y+42+42+21, String("COOLING"), FontColor); // Print string
   if (writetologtime==5)
   {
-    SDcard.writeerrorlog( Temp_GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE STOP COOLING");
+    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE STOP COOLING");
   }
   writetologtime++;
 
@@ -1093,7 +1068,7 @@ void TFTdisplaySHOCKCOOLING(void)
   tft.drawGFXText(x+31, y+42+42+21, String("COOLING"), FontColor); // Print string
   if (writetologtime==5)
   {
-    SDcard.writeerrorlog( Temp_GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE SHOCK COOLING");
+    SDcard.writeerrorlog( Thermometer.GetTemperature(), deltaT,Rpm_GetRpm(), ActualDate, ActualTime, flytime, kmh, "ENGINE SHOCK COOLING");
   }
   writetologtime++;
 
